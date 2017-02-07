@@ -72,8 +72,12 @@ describe('Run Hooks', () => {
     });
 
     describe('running hooks', () => {
-      beforeEach(function() {
-        this.stub(Hooks.prototype, 'runHooks').returns(sinon.stub().yields(2));
+      beforeEach(() => {
+        sinon.stub(Hooks.prototype, 'runHooks').returns(sinon.stub().yields(2));
+      });
+
+      afterEach(() => {
+        Hooks.prototype.runHooks.restore();
       });
 
       it('calls runHooks with the correct hook before and after each pipeline method', () => {
