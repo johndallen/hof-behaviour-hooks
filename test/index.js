@@ -32,12 +32,12 @@ describe('Hooks', () => {
     methodNames.forEach(method => {
       // make render and successHanlder terminate as normal
       if (method === 'render') {
-        sinon.stub(Form.prototype, method, (req, res) => {
-          res.render();
+        sinon.stub(Form.prototype, method, (q, s) => {
+          s.render();
         });
       } else if (method === 'successHandler') {
-        sinon.stub(Form.prototype, method, (req, res) => {
-          res.redirect();
+        sinon.stub(Form.prototype, method, (q, s) => {
+          s.redirect();
         });
       } else {
         sinon.stub(Form.prototype, method).yields();
