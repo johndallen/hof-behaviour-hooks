@@ -1,164 +1,273 @@
 'use strict';
 
-const proxyquire = require('proxyquire');
 const reqres = require('reqres');
-const _ = require('lodash');
-const HooksBehaviour = proxyquire('../', {
-  express: {
-    Router: () => ({
-      use: middleware => ({
-        handle: (req, res, next) => middleware.forEach(arg => arg(req, res, next))
-      })
-    })
-  }
-});
+const mix = require('mixwith').mix;
+const Form = require('hof-form-controller');
 
-const testHooksCalled = (fields, hookName, controller) => {
-  fields.forEach(field => {
-    controller.options.fields[field].hooks[hookName].should.have.been.calledOnce;
-  });
-  _.map(controller.options.fields, 'hooks')
-    .forEach(fieldHooks => {
-      _.each(fieldHooks, (hook, key) => {
-        if (key !== hookName) {
-          hook.should.not.have.been.called;
-        }
-      });
-    });
-};
+const sandbox = require('mocha-sandbox');
 
-describe('Run Hooks', () => {
-  const methodNames = [
-    '_getErrors',
-    '_getValues',
-    '_locals',
-    'render',
-    '_process',
-    '_validate',
-    'saveValues',
-    'successHandler'
-  ];
-  let Hooks;
-  class Controller {}
+const methodNames = [
+  '_getErrors',
+  '_getValues',
+  '_locals',
+  'render',
+  '_process',
+  '_validate',
+  'saveValues',
+  'successHandler'
+];
+
+describe('Hooks', () => {
+
+  let req;
+  let res;
+
+  const Hooks = require('../');
+
+  class Controller extends mix(Form).with(Hooks) {}
 
   beforeEach(() => {
+    req = reqres.req();
+    res = reqres.res();
     methodNames.forEach(method => {
-      Controller.prototype[method] = sinon.stub().yields(2);
-    });
-    Hooks = HooksBehaviour(Controller);
-  });
-
-  it('has a runHooks method', () => {
-    Hooks.prototype.should.have.property('runHooks').that.is.a('function');
-  });
-
-  it('extends the get and post pipeline methods', () => {
-    methodNames.forEach(name => {
-      Hooks.prototype.should.have.ownProperty(name);
-    });
-  });
-
-  describe('instance', () => {
-    let hooks;
-    let req;
-    let res;
-    let next;
-
-    beforeEach(() => {
-      hooks = new Hooks();
-      req = reqres.req();
-      res = reqres.res();
-      next = () => {};
-    });
-
-    describe('running hooks', () => {
-      beforeEach(() => {
-        sinon.stub(Hooks.prototype, 'runHooks').returns(sinon.stub().yields(2));
-      });
-
-      afterEach(() => {
-        Hooks.prototype.runHooks.restore();
-      });
-
-      it('calls runHooks with the correct hook before and after each pipeline method', () => {
-        const getHookName = name => name.replace(/^_/, '');
-        methodNames.forEach(name => {
-          const hookName = getHookName(name);
-          hooks[name](req, res, next);
-
-          Hooks.prototype.runHooks.should.have.been.calledTwice
-            .and.calledWith(`pre-${hookName}`)
-            .and.calledWith(`post-${hookName}`);
-
-          Hooks.prototype.runHooks.restore();
-          sinon.stub(Hooks.prototype, 'runHooks').returns(sinon.stub().yields(2));
+      // make render and successHanlder terminate as normal
+      if (method === 'render') {
+        sinon.stub(Form.prototype, method, (req, res) => {
+          res.render();
         });
-      });
-    });
-
-    describe('runHooks()', () => {
-      beforeEach(() => {
-        const getMiddlewareStub = () => sinon.stub().returns(sinon.stub().yields(2));
-        hooks.options = {
-          fields: {
-            'field-1': {
-              hooks: {
-                'pre-getErrors': getMiddlewareStub(),
-                'post-getErrors': getMiddlewareStub()
-              }
-            },
-            'field-2': {
-              hooks: {
-                'pre-getErrors': getMiddlewareStub(),
-                'pre-render': getMiddlewareStub(),
-                'post-process': getMiddlewareStub()
-              }
-            },
-            'field-3': {
-              hooks: {
-                'pre-getErrors': getMiddlewareStub(),
-                'pre-render': getMiddlewareStub(),
-                'post-render': getMiddlewareStub()
-              }
-            }
-          }
-        };
-      });
-
-      it('calls pre-getErrors hooks', () => {
-        const fields = ['field-1', 'field-2', 'field-3'];
-        const hookName = 'pre-getErrors';
-        hooks.runHooks(hookName)(req, res, next);
-        testHooksCalled(fields, hookName, hooks);
-      });
-
-      it('calls post-getErrors hooks', () => {
-        const fields = ['field-1'];
-        const hookName = 'post-getErrors';
-        hooks.runHooks(hookName)(req, res, next);
-        testHooksCalled(fields, hookName, hooks);
-      });
-
-      it('calls pre-render hooks', () => {
-        const fields = ['field-2', 'field-3'];
-        const hookName = 'pre-render';
-        hooks.runHooks(hookName)(req, res, next);
-        testHooksCalled(fields, hookName, hooks);
-      });
-
-      it('calls post-process hooks', () => {
-        const fields = ['field-2'];
-        const hookName = 'post-process';
-        hooks.runHooks(hookName)(req, res, next);
-        testHooksCalled(fields, hookName, hooks);
-      });
-
-      it('calls post-render hooks', () => {
-        const fields = ['field-3'];
-        const hookName = 'post-render';
-        hooks.runHooks(hookName)(req, res, next);
-        testHooksCalled(fields, hookName, hooks);
-      });
+      } else if (method === 'successHandler') {
+        sinon.stub(Form.prototype, method, (req, res) => {
+          res.redirect();
+        });
+      } else {
+        sinon.stub(Form.prototype, method).yields();
+      }
     });
   });
+  afterEach(() => {
+    methodNames.forEach(method => {
+      Form.prototype[method].restore();
+    });
+  });
+
+  describe('get pipeline', () => {
+
+    it('calls getErrors lifecycle hooks', (done) => {
+      const fields = {
+        field: {
+          hooks: {
+            'pre-getErrors': sinon.stub().yields(),
+            'post-getErrors': sinon.stub().yields()
+          }
+        }
+      };
+      const controller = new Controller({fields});
+      controller.get(req, res, sinon.stub());
+
+      res.on('end', sandbox(() => {
+        expect(fields.field.hooks['pre-getErrors']).to.have.been.calledOnce;
+        expect(fields.field.hooks['pre-getErrors']).to.have.been.calledWith(req, res);
+        expect(Form.prototype._getErrors).to.have.been.calledOnce;
+        expect(Form.prototype._getErrors).to.have.been.calledWith(req, res);
+        expect(fields.field.hooks['post-getErrors']).to.have.been.calledOnce;
+        expect(fields.field.hooks['post-getErrors']).to.have.been.calledWith(req, res);
+        expect(fields.field.hooks['pre-getErrors']).to.have.been.calledBefore(Form.prototype._getErrors);
+        expect(fields.field.hooks['post-getErrors']).to.have.been.calledAfter(Form.prototype._getErrors);
+      }, done));
+    });
+
+    it('calls getValues lifecycle hooks', (done) => {
+      const fields = {
+        field: {
+          hooks: {
+            'pre-getValues': sinon.stub().yields(),
+            'post-getValues': sinon.stub().yields()
+          }
+        }
+      };
+      const controller = new Controller({fields});
+      controller.get(req, res, sinon.stub());
+
+      res.on('end', sandbox(() => {
+        expect(fields.field.hooks['pre-getValues']).to.have.been.calledOnce;
+        expect(fields.field.hooks['pre-getValues']).to.have.been.calledWith(req, res);
+        expect(Form.prototype._getValues).to.have.been.calledOnce;
+        expect(Form.prototype._getValues).to.have.been.calledWith(req, res);
+        expect(fields.field.hooks['post-getValues']).to.have.been.calledOnce;
+        expect(fields.field.hooks['post-getValues']).to.have.been.calledWith(req, res);
+        expect(fields.field.hooks['pre-getValues']).to.have.been.calledBefore(Form.prototype._getValues);
+        expect(fields.field.hooks['post-getValues']).to.have.been.calledAfter(Form.prototype._getValues);
+      }, done));
+    });
+
+    it('calls locals lifecycle hooks', (done) => {
+      const fields = {
+        field: {
+          hooks: {
+            'pre-locals': sinon.stub().yields(),
+            'post-locals': sinon.stub().yields()
+          }
+        }
+      };
+      const controller = new Controller({fields});
+      controller.get(req, res, sinon.stub());
+
+      res.on('end', sandbox(() => {
+        expect(fields.field.hooks['pre-locals']).to.have.been.calledOnce;
+        expect(fields.field.hooks['pre-locals']).to.have.been.calledWith(req, res);
+        expect(Form.prototype._locals).to.have.been.calledOnce;
+        expect(Form.prototype._locals).to.have.been.calledWith(req, res);
+        expect(fields.field.hooks['post-locals']).to.have.been.calledOnce;
+        expect(fields.field.hooks['post-locals']).to.have.been.calledWith(req, res);
+        expect(fields.field.hooks['pre-locals']).to.have.been.calledBefore(Form.prototype._locals);
+        expect(fields.field.hooks['post-locals']).to.have.been.calledAfter(Form.prototype._locals);
+      }, done));
+    });
+
+    it('calls render "pre" lifecycle hooks only because render terminates', (done) => {
+      const fields = {
+        field: {
+          hooks: {
+            'pre-render': sinon.stub().yields(),
+            'post-render': sinon.stub().yields()
+          }
+        }
+      };
+      const controller = new Controller({fields});
+      controller.get(req, res, sinon.stub());
+
+      res.on('end', sandbox(() => {
+        expect(fields.field.hooks['pre-render']).to.have.been.calledOnce;
+        expect(fields.field.hooks['pre-render']).to.have.been.calledWith(req, res);
+        expect(Form.prototype.render).to.have.been.calledOnce;
+        expect(Form.prototype.render).to.have.been.calledWith(req, res);
+        expect(fields.field.hooks['post-render']).not.to.have.been.called;
+
+        expect(fields.field.hooks['pre-render']).to.have.been.calledBefore(Form.prototype.render);
+      }, done));
+    });
+
+  });
+
+  describe('post pipeline', () => {
+
+    it('calls process lifecycle hooks', (done) => {
+      const fields = {
+        field: {
+          hooks: {
+            'pre-process': sinon.stub().yields(),
+            'post-process': sinon.stub().yields()
+          }
+        }
+      };
+      const controller = new Controller({fields});
+      controller.post(req, res, sinon.stub());
+
+      res.on('end', sandbox(() => {
+        expect(fields.field.hooks['pre-process']).to.have.been.calledOnce;
+        expect(fields.field.hooks['pre-process']).to.have.been.calledWith(req, res);
+        expect(Form.prototype._process).to.have.been.calledOnce;
+        expect(Form.prototype._process).to.have.been.calledWith(req, res);
+        expect(fields.field.hooks['post-process']).to.have.been.calledOnce;
+        expect(fields.field.hooks['post-process']).to.have.been.calledWith(req, res);
+        expect(fields.field.hooks['pre-process']).to.have.been.calledBefore(Form.prototype._process);
+        expect(fields.field.hooks['post-process']).to.have.been.calledAfter(Form.prototype._process);
+      }, done));
+    });
+
+    it('calls validate lifecycle hooks', (done) => {
+      const fields = {
+        field: {
+          hooks: {
+            'pre-validate': sinon.stub().yields(),
+            'post-validate': sinon.stub().yields()
+          }
+        }
+      };
+      const controller = new Controller({fields});
+      controller.post(req, res, sinon.stub());
+
+      res.on('end', sandbox(() => {
+        expect(fields.field.hooks['pre-validate']).to.have.been.calledOnce;
+        expect(fields.field.hooks['pre-validate']).to.have.been.calledWith(req, res);
+        expect(Form.prototype._validate).to.have.been.calledOnce;
+        expect(Form.prototype._validate).to.have.been.calledWith(req, res);
+        expect(fields.field.hooks['post-validate']).to.have.been.calledOnce;
+        expect(fields.field.hooks['post-validate']).to.have.been.calledWith(req, res);
+        expect(fields.field.hooks['pre-validate']).to.have.been.calledBefore(Form.prototype._validate);
+        expect(fields.field.hooks['post-validate']).to.have.been.calledAfter(Form.prototype._validate);
+      }, done));
+    });
+
+    it('calls saveValues lifecycle hooks', (done) => {
+      const fields = {
+        field: {
+          hooks: {
+            'pre-saveValues': sinon.stub().yields(),
+            'post-saveValues': sinon.stub().yields()
+          }
+        }
+      };
+      const controller = new Controller({fields});
+      controller.post(req, res, sinon.stub());
+
+      res.on('end', sandbox(() => {
+        expect(fields.field.hooks['pre-saveValues']).to.have.been.calledOnce;
+        expect(fields.field.hooks['pre-saveValues']).to.have.been.calledWith(req, res);
+        expect(Form.prototype.saveValues).to.have.been.calledOnce;
+        expect(Form.prototype.saveValues).to.have.been.calledWith(req, res);
+        expect(fields.field.hooks['post-saveValues']).to.have.been.calledOnce;
+        expect(fields.field.hooks['post-saveValues']).to.have.been.calledWith(req, res);
+        expect(fields.field.hooks['pre-saveValues']).to.have.been.calledBefore(Form.prototype.saveValues);
+        expect(fields.field.hooks['post-saveValues']).to.have.been.calledAfter(Form.prototype.saveValues);
+      }, done));
+    });
+
+    it('calls successHandler "pre" lifecycle hooks only because successHandler terminates', (done) => {
+      const fields = {
+        field: {
+          hooks: {
+            'pre-successHandler': sinon.stub().yields(),
+            'post-successHandler': sinon.stub().yields()
+          }
+        }
+      };
+      const controller = new Controller({fields});
+      controller.post(req, res, sinon.stub());
+
+      res.on('end', sandbox(() => {
+        expect(fields.field.hooks['pre-successHandler']).to.have.been.calledOnce;
+        expect(fields.field.hooks['pre-successHandler']).to.have.been.calledWith(req, res);
+        expect(Form.prototype.successHandler).to.have.been.calledOnce;
+        expect(Form.prototype.successHandler).to.have.been.calledWith(req, res);
+
+        expect(fields.field.hooks['post-successHandler']).not.to.have.been.called;
+        expect(fields.field.hooks['pre-successHandler']).to.have.been.calledBefore(Form.prototype.successHandler);
+      }, done));
+    });
+
+  });
+
+  describe('error handling', () => {
+
+    it('stops execution pipeline if a hook fails', (done) => {
+      const error = new Error('test error');
+      const fields = {
+        field: {
+          hooks: {
+            'pre-getErrors': sinon.stub().yields(error)
+          }
+        }
+      };
+      const controller = new Controller({fields});
+      controller.get(req, res, sandbox((err) => {
+        expect(fields.field.hooks['pre-getErrors']).to.have.been.calledOnce;
+        expect(fields.field.hooks['pre-getErrors']).to.have.been.calledWith(req, res);
+        expect(Form.prototype._getErrors).not.to.have.been.called;
+        expect(err).to.equal(error);
+      }, done));
+    });
+
+  });
+
 });
