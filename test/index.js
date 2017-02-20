@@ -50,6 +50,30 @@ describe('Hooks', () => {
     });
   });
 
+  it('passes params to child', done => {
+    req.params = {
+      foo: 'bar'
+    };
+    req.form = {
+      options: {
+        fields: {
+          field: {
+            hooks: {
+              'pre-getErrors': sinon.stub().yields()
+            }
+          }
+        }
+      }
+    };
+    Form.prototype._getErrors.restore();
+    sinon.stub(Form.prototype, '_getErrors', (r) => {
+      expect(r.params.foo).to.be.equal('bar');
+      done();
+    });
+    const controller = new Controller({});
+    controller.get(req, res, sinon.stub());
+  });
+
   describe('get pipeline', () => {
 
     it('calls getErrors lifecycle hooks', (done) => {
