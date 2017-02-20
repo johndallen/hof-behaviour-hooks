@@ -1,6 +1,6 @@
 {
   "name": "hof-behaviour-hooks",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "HOF Behaviour for running lifecycle hooks",
   "main": "index.js",
   "scripts": {
